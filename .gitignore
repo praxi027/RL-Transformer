@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data & model artifacts
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+data/
+checkpoints/
+outputs/
+wandb/
+runs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
