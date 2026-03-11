@@ -1,17 +1,12 @@
 import argparse
 import sys
 import os
+from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.utils.seeding import set_global_seed
-from src.config.base import TrainConfig
-from src.config.dqn_frozen_lake import DQNConfig, FrozenLakeConfig
-from src.envs.frozen_lake import FrozenLakeWrapper
-from src.networks.mlp import QNetwork
-from src.agents.dqn import DQNAgent
-from src.training.trainer import Trainer
-from src.evaluation.evaluator import evaluate
+from src.config import DQNConfig, FrozenLakeConfig
+from src.train import train_dqn, save_results
 
 
 def main():
@@ -25,47 +20,22 @@ def main():
     parser.add_argument("--slippery", action="store_true")
     args = parser.parse_args()
 
-    set_global_seed(args.seed)
-
-    train_config = TrainConfig(
-        seed=args.seed,
-        total_timesteps=args.total_timesteps,
-        device=args.device,
-    )
     dqn_config = DQNConfig(
         lr=args.lr,
         gamma=args.gamma,
         target_update_alpha=args.alpha,
+        total_timesteps=args.total_timesteps,
     )
     env_config = FrozenLakeConfig(is_slippery=args.slippery)
 
-    env = FrozenLakeWrapper(env_config)
-    q_net = QNetwork(env.observation_dim, env.num_actions, hidden_dims=dqn_config.hidden_dims)
-    agent = DQNAgent(q_net, dqn_config, env.observation_dim, device=args.device)
-
-    # Train
-    trainer = Trainer(agent, env, train_config)
-    metrics = trainer.train()
-
-    # Evaluate in-distribution
-    print("\n--- In-Distribution Evaluation ---")
-    eval_summary, _ = evaluate(agent, env, num_episodes=50)
-    print(f"Success rate: {eval_summary['success_rate']:.2%} | "
-          f"Mean reward: {eval_summary['mean_reward']:.2f}")
-
-    # Evaluate out-of-distribution
-    print("\n--- Out-of-Distribution Evaluation ---")
-    ood_config = FrozenLakeConfig(
-        map_sizes=env_config.ood_map_sizes,
-        is_slippery=env_config.is_slippery,
+    agent, ep_rewards, ep_successes, desc = train_dqn(
+        dqn_config, env_config, seed=args.seed, device=args.device,
     )
-    ood_env = FrozenLakeWrapper(ood_config)
-    ood_summary, _ = evaluate(agent, ood_env, num_episodes=50)
-    print(f"Success rate: {ood_summary['success_rate']:.2%} | "
-          f"Mean reward: {ood_summary['mean_reward']:.2f}")
 
-    env.close()
-    ood_env.close()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join("experiments", timestamp)
+    save_results(run_dir, agent, ep_rewards, ep_successes)
+    print(f"\nResults saved to {run_dir}")
 
 
 if __name__ == "__main__":
