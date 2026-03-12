@@ -24,3 +24,11 @@ class FrozenLakeConfig:
     is_slippery: bool = False
     max_episode_steps: int = 200
     reward_scale: float = 30.0
+
+
+@dataclass
+class FormatConfig:
+    max_tokens: int = 4096
+    set_size_range: tuple = (20, 40)
+    quality: str = "mid"
+    num_slices: int = 10_000
