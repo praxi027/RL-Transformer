@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from peft import get_peft_model, IA3Config
 
 from src.tokenize_data import MODEL_ID, ACTION_TOKEN_IDS
@@ -18,14 +18,22 @@ TOKEN_ID_TO_IDX = {tid: i for i, tid in enumerate(ACTION_IDS_ORDERED.tolist())}
 
 
 class ICRLModel:
-    def __init__(self, model_id=MODEL_ID, device="cuda", alpha=0.1, gamma=0.9):
+    def __init__(self, model_id=MODEL_ID, device="cuda", alpha=0.1, gamma=0.9,
+                 load_in_4bit=False):
         self.device = device
         self.alpha = alpha
         self.gamma = gamma
 
-        base = AutoModelForCausalLM.from_pretrained(
-            model_id, torch_dtype=torch.bfloat16,
-        )
+        load_kwargs = {"torch_dtype": torch.bfloat16}
+        if load_in_4bit:
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_quant_type="nf4",
+            )
+            load_kwargs["device_map"] = {"": device}
+
+        base = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
 
         ia3_config = IA3Config(
             task_type="CAUSAL_LM",
@@ -33,7 +41,8 @@ class ICRLModel:
             feedforward_modules=["down_proj"],
         )
         self.model = get_peft_model(base, ia3_config)
-        self.model.to(device)
+        if not load_in_4bit:
+            self.model.to(device)
 
         # Target adapter: clone of trainable (IA3) weights
         self.target_state = {

@@ -24,13 +24,16 @@ def main():
     parser.add_argument("--map-sizes", type=str, default="3,4,5",
                         help="Comma-separated map sizes (3,4,5 for ID; 6,7 for OOD)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--load-in-4bit", action="store_true")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
     map_sizes = tuple(int(s) for s in args.map_sizes.split(","))
 
     print(f"Loading model from {args.checkpoint} ...")
-    model = ICRLModel(model_id=args.model_id, device=args.device)
+    model = ICRLModel(
+        model_id=args.model_id, device=args.device, load_in_4bit=args.load_in_4bit,
+    )
     model.load(args.checkpoint)
     tokenizer = load_tokenizer()
 

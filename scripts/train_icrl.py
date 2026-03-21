@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     parser.add_argument("--log-interval", type=int, default=1)
     parser.add_argument("--save-interval", type=int, default=100)
+    parser.add_argument("--load-in-4bit", action="store_true")
     args = parser.parse_args()
 
     train_icrl(
@@ -38,6 +39,7 @@ def main():
         num_epochs=args.num_epochs,
         log_interval=args.log_interval,
         save_interval=args.save_interval,
+        load_in_4bit=args.load_in_4bit,
     )
 
 

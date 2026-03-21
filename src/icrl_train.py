@@ -34,6 +34,7 @@ def train_icrl(
     num_epochs=1,
     log_interval=1,
     save_interval=100,
+    load_in_4bit=False,
 ):
     os.makedirs(output_dir, exist_ok=True)
 
@@ -45,7 +46,10 @@ def train_icrl(
     print(f"Batch size: {batch_size} (micro={micro_batch_size}, accum={grad_accum_steps})")
     print(f"Steps per epoch: {len(dataset) // batch_size}")
 
-    model = ICRLModel(model_id=model_id, device=device, alpha=alpha, gamma=gamma)
+    model = ICRLModel(
+        model_id=model_id, device=device, alpha=alpha, gamma=gamma,
+        load_in_4bit=load_in_4bit,
+    )
     model.model.print_trainable_parameters()
 
     optimizer = torch.optim.Adam(model.trainable_params(), lr=lr)
