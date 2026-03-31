@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Re-launch inside a tmux session if not already in one
+if [ -z "$TMUX" ]; then
+    tmux new-session -d -s icrl "bash $0"
+    echo "Started in tmux session 'icrl'. Attach with: tmux attach -t icrl"
+    exit 0
+fi
+
 echo "=== Step 0: Setup ==="
 python -m venv venv
 source venv/bin/activate
