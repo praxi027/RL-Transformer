@@ -83,6 +83,7 @@ def tokenize_slice(tokenizer, text, max_length=4096):
 
     # Truncate or pad to max_length
     if len(encoding) > max_length:
+        print(f"WARNING: Slice has {len(encoding)} tokens, truncating to {max_length}")
         encoding = encoding[:max_length]
     pad_len = max_length - len(encoding)
     attention_mask = [1] * len(encoding) + [0] * pad_len

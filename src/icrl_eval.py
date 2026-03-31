@@ -38,7 +38,11 @@ def build_prompt_for_action(tokenizer, episodes_text, current_obs):
 
 
 def select_action(model, tokenizer, token_ids, epsilon, rng):
-    """Select an action using epsilon-greedy over the model's Q-values."""
+    """Select an action using epsilon-greedy over the model's Q-values.
+
+    epsilon = probability of using the model (paper convention, inverted from
+    standard RL where epsilon = exploration rate).
+    """
     if rng.random() >= epsilon:
         return rng.randint(0, 3)
 
@@ -84,9 +88,23 @@ def run_episode(model, tokenizer, env, episodes_text, epsilon, rng, max_steps=20
     return history, ep_text, total_reward
 
 
+def trim_context(episodes_texts, tokenizer, max_tokens=3600):
+    """Keep the most recent episodes that fit within max_tokens.
+
+    Reserves ~500 tokens for the current observation/action prompt.
+    """
+    combined = ""
+    for ep_text in reversed(episodes_texts):
+        candidate = ep_text + combined
+        if len(tokenizer.encode(candidate, add_special_tokens=False)) > max_tokens:
+            break
+        combined = candidate
+    return combined
+
+
 def evaluate_map(
     model, tokenizer, size, num_episodes=30, warmup_episodes=20,
-    is_slippery=False, max_episode_steps=200, seed=None,
+    is_slippery=False, max_episode_steps=200, seed=None, max_context_tokens=4096,
 ):
     """Evaluate on a single map for num_episodes with epsilon-greedy warmup."""
     rng = random.Random(seed)
@@ -94,7 +112,7 @@ def evaluate_map(
         size=size, is_slippery=is_slippery, max_episode_steps=max_episode_steps,
     )
 
-    episodes_text = ""
+    episode_texts = []
     rewards = []
 
     for ep in range(num_episodes):
@@ -104,11 +122,16 @@ def evaluate_map(
         else:
             epsilon = 1.0
 
+        # Sliding window: keep recent episodes within training context limit
+        episodes_text = trim_context(
+            episode_texts, tokenizer, max_tokens=max_context_tokens - 500,
+        )
+
         _, ep_text, total_reward = run_episode(
             model, tokenizer, env, episodes_text, epsilon, rng,
             max_steps=max_episode_steps,
         )
-        episodes_text += ep_text
+        episode_texts.append(ep_text)
         rewards.append(total_reward)
 
     env.close()
