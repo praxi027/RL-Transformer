@@ -25,6 +25,14 @@ def main():
     )
     env_config = FrozenLakeConfig()
 
+    import torch
+    if args.device == "cuda" and not torch.cuda.is_available():
+        print("WARNING: CUDA not available, falling back to CPU")
+        args.device = "cpu"
+    print(f"Using device: {args.device}")
+    if args.device == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+
     os.makedirs(args.out_dir, exist_ok=True)
     manifest = []
 
