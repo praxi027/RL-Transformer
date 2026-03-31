@@ -10,7 +10,7 @@ pip install torch gymnasium numpy matplotlib tqdm
 pip install transformers peft accelerate datasets bitsandbytes
 
 echo "=== Step 1: Collect trajectories (250 maps) ==="
-python scripts/collect_trajectories.py --num-maps 250
+python scripts/collect_trajectories.py --num-maps 250 --device cuda
 
 echo "=== Step 2: Format trajectories ==="
 python scripts/format_trajectories.py --output data/formatted/mid.jsonl
