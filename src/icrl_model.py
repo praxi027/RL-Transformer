@@ -24,7 +24,7 @@ class ICRLModel:
         self.alpha = alpha
         self.gamma = gamma
 
-        load_kwargs = {"torch_dtype": torch.bfloat16}
+        load_kwargs = {"dtype": torch.bfloat16}
         if load_in_4bit:
             load_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -125,8 +125,8 @@ class ICRLModel:
         target_q_next = target_q_all[batch_idx, next_logit_pos].max(dim=1).values
 
         # Bellman target: y = r + gamma * max Q_target(s') * (1 - terminal)
-        term = terminal_mask[batch_idx, pos_idx].float()
-        rew = rewards[batch_idx, pos_idx]
+        term = terminal_mask[batch_idx, pos_idx].to(dtype=target_q_next.dtype)
+        rew = rewards[batch_idx, pos_idx].to(dtype=target_q_next.dtype)
         y = rew + self.gamma * target_q_next * (1.0 - term)
 
         loss = F.mse_loss(q_taken, y.detach())
