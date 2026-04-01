@@ -38,7 +38,7 @@ def main():
             desc=f"Building slices ({args.quality})",
         ):
             f.write(json.dumps(sl) + "\n")
-            total_tokens += sl["num_tokens_approx"]
+            total_tokens += sl["num_tokens"]
             total_sets += sl["num_sets"]
             total_episodes += sl["num_episodes"]
 

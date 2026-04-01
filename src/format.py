@@ -3,6 +3,8 @@ import os
 import random
 import re
 
+from transformers import AutoTokenizer
+
 ACTION_MAP = {0: "left", 1: "down", 2: "right", 3: "up"}
 
 BOT = "<|begin_of_text|>"
@@ -13,11 +15,22 @@ EID = "<|eot_id|>"
 
 SPECIAL_TOKENS = [BOT, EOT, SHI, EHI, EID]
 
+MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
+
 QUALITY_WEIGHTS = {
     "high": (5, 1),  # (success_weight, failure_weight)
     "mid": (1, 1),
     "low": (1, 5),
 }
+
+_tokenizer = None
+
+
+def get_tokenizer():
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    return _tokenizer
 
 
 def format_step(obs, action, reward=None):
@@ -38,17 +51,7 @@ def format_episode(episode):
 
 
 def count_tokens(text):
-    remaining = text
-    count = 0
-    for tok in SPECIAL_TOKENS:
-        n = remaining.count(tok)
-        count += n
-        remaining = remaining.replace(tok, "")
-    for part in remaining.split("\n"):
-        part = part.strip()
-        if part:
-            count += 1
-    return count
+    return len(get_tokenizer().encode(text, add_special_tokens=False))
 
 
 def sample_set(episodes, set_size, quality, rng):
@@ -76,27 +79,32 @@ def build_slice(map_pool, max_tokens, set_size_range, quality, rng):
     sets_used = 0
     episodes_used = 0
 
-    while True:
+    while token_count < max_tokens * 0.85:
         map_data = rng.choice(map_pool)
         set_size = rng.randint(set_size_range[0], set_size_range[1])
         episodes = sample_set(map_data["episodes"], set_size, quality, rng)
-        set_text = format_set(episodes)
-        set_tokens = count_tokens(set_text)
 
-        if token_count + set_tokens > max_tokens and sets_used > 0:
-            break
+        # Add episodes one at a time so we never exceed max_tokens
+        added = 0
+        for ep in episodes:
+            ep_text = format_episode(ep)
+            ep_tokens = count_tokens(ep_text)
+            if token_count + ep_tokens > max_tokens:
+                break
+            slice_text += ep_text
+            token_count += ep_tokens
+            added += 1
 
-        slice_text += set_text
-        token_count += set_tokens
-        sets_used += 1
-        episodes_used += set_size
+        if added > 0:
+            sets_used += 1
+            episodes_used += added
 
-        if token_count >= max_tokens * 0.85:
-            break
+        if added < len(episodes):
+            break  # hit the token limit mid-set
 
     return {
         "text": slice_text,
-        "num_tokens_approx": token_count,
+        "num_tokens": token_count,
         "num_sets": sets_used,
         "num_episodes": episodes_used,
         "quality": quality,
