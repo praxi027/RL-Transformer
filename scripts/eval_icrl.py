@@ -24,7 +24,9 @@ def main():
     parser.add_argument("--map-sizes", type=str, default="3,4,5",
                         help="Comma-separated map sizes (3,4,5 for ID; 6,7 for OOD)")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--load-in-4bit", action="store_true")
+    quant_group = parser.add_mutually_exclusive_group()
+    quant_group.add_argument("--load-in-4bit", action="store_true")
+    quant_group.add_argument("--load-in-8bit", action="store_true")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -32,7 +34,10 @@ def main():
 
     print(f"Loading model from {args.checkpoint} ...")
     model = ICRLModel(
-        model_id=args.model_id, device=args.device, load_in_4bit=args.load_in_4bit,
+        model_id=args.model_id,
+        device=args.device,
+        load_in_4bit=args.load_in_4bit,
+        load_in_8bit=args.load_in_8bit,
     )
     model.load(args.checkpoint)
     tokenizer = load_tokenizer()

@@ -35,20 +35,38 @@ def train_icrl(
     log_interval=1,
     save_interval=100,
     load_in_4bit=False,
+    load_in_8bit=False,
+    gradient_checkpointing=False,
 ):
     os.makedirs(output_dir, exist_ok=True)
+    if batch_size % micro_batch_size != 0:
+        raise ValueError("batch_size must be divisible by micro_batch_size")
 
     dataset = TrajectoryDataset(dataset_path)
-    loader = DataLoader(dataset, batch_size=micro_batch_size, shuffle=True)
+    loader = DataLoader(
+        dataset,
+        batch_size=micro_batch_size,
+        shuffle=True,
+        pin_memory=device.startswith("cuda"),
+    )
 
     grad_accum_steps = batch_size // micro_batch_size
     print(f"Dataset: {len(dataset)} slices")
     print(f"Batch size: {batch_size} (micro={micro_batch_size}, accum={grad_accum_steps})")
     print(f"Steps per epoch: {len(dataset) // batch_size}")
+    if load_in_4bit:
+        print("Quantization: 4-bit NF4")
+    elif load_in_8bit:
+        print("Quantization: 8-bit")
+    else:
+        print("Quantization: none")
+    print(f"Gradient checkpointing: {gradient_checkpointing}")
 
     model = ICRLModel(
         model_id=model_id, device=device, alpha=alpha, gamma=gamma,
         load_in_4bit=load_in_4bit,
+        load_in_8bit=load_in_8bit,
+        gradient_checkpointing=gradient_checkpointing,
     )
     model.model.print_trainable_parameters()
 

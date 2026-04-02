@@ -17,17 +17,19 @@ echo "=== Step 3: Tokenize ==="
 python scripts/tokenize_dataset.py --input data/formatted/mid.jsonl --output-dir data/tokenized
 
 echo "=== Step 4: Train ICRL ==="
-python scripts/train_icrl.py --micro-batch-size 1
+python scripts/train_icrl.py --load-in-4bit --micro-batch-size 1
 
 echo "=== Step 5: Evaluate (in-distribution) ==="
 python scripts/eval_icrl.py \
     --checkpoint experiments/icrl/checkpoint_final.pt \
+    --load-in-4bit \
     --num-maps 50 \
     --map-sizes 3,4,5
 
 echo "=== Step 5b: Evaluate (out-of-distribution) ==="
 python scripts/eval_icrl.py \
     --checkpoint experiments/icrl/checkpoint_final.pt \
+    --load-in-4bit \
     --num-maps 50 \
     --map-sizes 6,7 \
     --output-dir experiments/eval_ood

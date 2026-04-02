@@ -73,11 +73,25 @@ python scripts/train_icrl.py --load-in-4bit --micro-batch-size 1
 
 Key flags:
 - `--load-in-4bit`: 4-bit quantization (required for <16GB VRAM)
+- `--load-in-8bit`: 8-bit quantization (uses more VRAM than 4-bit, may be slightly simpler to debug)
+- `--gradient-checkpointing`: saves VRAM, but usually makes training slower
 - `--micro-batch-size 1`: process 1 slice at a time (gradient accumulation handles the rest)
 - `--batch-size 10`: effective batch size (paper default)
 - `--lr 0.01`: learning rate (paper default)
 - `--alpha 0.1`: Polyak averaging factor
 - `--num-epochs 1`: number of passes over the dataset
+
+Example training commands:
+```bash
+# Lowest VRAM footprint
+python scripts/train_icrl.py --load-in-4bit --micro-batch-size 1
+
+# If you still hit OOM
+python scripts/train_icrl.py --load-in-4bit --micro-batch-size 1 --gradient-checkpointing
+
+# Alternative quantized path
+python scripts/train_icrl.py --load-in-8bit --micro-batch-size 1
+```
 
 Output: `experiments/icrl/checkpoint_final.pt` + `train_log.jsonl`
 

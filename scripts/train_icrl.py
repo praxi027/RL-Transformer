@@ -22,7 +22,10 @@ def main():
     parser.add_argument("--gamma", type=float, default=0.9, help="Discount factor")
     parser.add_argument("--log-interval", type=int, default=1)
     parser.add_argument("--save-interval", type=int, default=100)
-    parser.add_argument("--load-in-4bit", action="store_true")
+    quant_group = parser.add_mutually_exclusive_group()
+    quant_group.add_argument("--load-in-4bit", action="store_true")
+    quant_group.add_argument("--load-in-8bit", action="store_true")
+    parser.add_argument("--gradient-checkpointing", action="store_true")
     args = parser.parse_args()
 
     train_icrl(
@@ -40,6 +43,8 @@ def main():
         log_interval=args.log_interval,
         save_interval=args.save_interval,
         load_in_4bit=args.load_in_4bit,
+        load_in_8bit=args.load_in_8bit,
+        gradient_checkpointing=args.gradient_checkpointing,
     )
 
 

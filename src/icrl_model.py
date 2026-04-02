@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
-from peft import get_peft_model, IA3Config
+from peft import get_peft_model, IA3Config, prepare_model_for_kbit_training
 
 from src.tokenize_data import MODEL_ID, ACTION_TOKEN_IDS
 
@@ -19,12 +19,19 @@ TOKEN_ID_TO_IDX = {tid: i for i, tid in enumerate(ACTION_IDS_ORDERED.tolist())}
 
 class ICRLModel:
     def __init__(self, model_id=MODEL_ID, device="cuda", alpha=0.1, gamma=0.9,
-                 load_in_4bit=False):
+                 load_in_4bit=False, load_in_8bit=False,
+                 gradient_checkpointing=False):
+        if load_in_4bit and load_in_8bit:
+            raise ValueError("Choose only one quantization mode: 4-bit or 8-bit")
+
         self.device = device
         self.alpha = alpha
         self.gamma = gamma
 
-        load_kwargs = {"dtype": torch.bfloat16}
+        load_kwargs = {
+            "torch_dtype": torch.bfloat16,
+            "low_cpu_mem_usage": True,
+        }
         if load_in_4bit:
             load_kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -32,8 +39,25 @@ class ICRLModel:
                 bnb_4bit_quant_type="nf4",
             )
             load_kwargs["device_map"] = {"": device}
+        elif load_in_8bit:
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+            )
+            load_kwargs["device_map"] = {"": device}
 
         base = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        if load_in_4bit or load_in_8bit:
+            gc_kwargs = {"use_reentrant": False} if gradient_checkpointing else None
+            base = prepare_model_for_kbit_training(
+                base,
+                use_gradient_checkpointing=gradient_checkpointing,
+                gradient_checkpointing_kwargs=gc_kwargs,
+            )
+        elif gradient_checkpointing:
+            base.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False},
+            )
+            base.config.use_cache = False
 
         ia3_config = IA3Config(
             task_type="CAUSAL_LM",
@@ -41,7 +65,13 @@ class ICRLModel:
             feedforward_modules=["down_proj"],
         )
         self.model = get_peft_model(base, ia3_config)
-        if not load_in_4bit:
+        if gradient_checkpointing:
+            self.model.config.use_cache = False
+        # Ensure IA3 adapter weights match the base model dtype
+        for p in self.model.parameters():
+            if p.requires_grad and p.dtype != torch.bfloat16:
+                p.data = p.data.to(torch.bfloat16)
+        if not (load_in_4bit or load_in_8bit):
             self.model.to(device)
 
         # Target adapter: clone of trainable (IA3) weights
