@@ -26,6 +26,8 @@ def main():
     quant_group.add_argument("--load-in-4bit", action="store_true")
     quant_group.add_argument("--load-in-8bit", action="store_true")
     parser.add_argument("--gradient-checkpointing", action="store_true")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Resume from a checkpoint saved by train_icrl.py")
     args = parser.parse_args()
 
     train_icrl(
@@ -45,6 +47,7 @@ def main():
         load_in_4bit=args.load_in_4bit,
         load_in_8bit=args.load_in_8bit,
         gradient_checkpointing=args.gradient_checkpointing,
+        resume=args.resume,
     )
 
 

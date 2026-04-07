@@ -11,11 +11,28 @@ fi
 source venv/bin/activate
 
 echo "=== Step 4: Train ICRL (no quantization, Double DQN) ==="
-python scripts/train_icrl.py \
-    --micro-batch-size 1 \
+TRAIN_ARGS=(
+    --micro-batch-size 2 \
     --batch-size 10 \
     --lr 1e-2 \
     --output-dir experiments/icrl_fp16
+)
+
+if [ ! -f experiments/icrl_fp16/checkpoint_final.pt ]; then
+    latest_checkpoint="$(
+        find experiments/icrl_fp16 -maxdepth 1 -name 'checkpoint_*.pt' \
+            | sed -E 's/.*checkpoint_([0-9]+)\.pt$/\1 &/' \
+            | sort -n \
+            | tail -n 1 \
+            | cut -d' ' -f2-
+    )"
+    if [ -n "$latest_checkpoint" ]; then
+        echo "Resuming from $latest_checkpoint"
+        TRAIN_ARGS+=(--resume "$latest_checkpoint")
+    fi
+fi
+
+python scripts/train_icrl.py "${TRAIN_ARGS[@]}"
 
 echo "=== Step 5a: Evaluate in-distribution (sizes 3-5) ==="
 python scripts/eval_icrl.py \

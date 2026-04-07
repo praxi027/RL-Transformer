@@ -29,7 +29,7 @@ class ICRLModel:
         self.gamma = gamma
 
         load_kwargs = {
-            "torch_dtype": torch.bfloat16,
+            "dtype": torch.bfloat16,
             "low_cpu_mem_usage": True,
         }
         if load_in_4bit:
@@ -46,6 +46,7 @@ class ICRLModel:
             load_kwargs["device_map"] = {"": device}
 
         base = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+        base.config.use_cache = False
         if load_in_4bit or load_in_8bit:
             gc_kwargs = {"use_reentrant": False} if gradient_checkpointing else None
             base = prepare_model_for_kbit_training(
@@ -65,8 +66,7 @@ class ICRLModel:
             feedforward_modules=["down_proj"],
         )
         self.model = get_peft_model(base, ia3_config)
-        if gradient_checkpointing:
-            self.model.config.use_cache = False
+        self.model.config.use_cache = False
         # Ensure IA3 adapter weights match the base model dtype
         for p in self.model.parameters():
             if p.requires_grad and p.dtype != torch.bfloat16:
@@ -84,6 +84,12 @@ class ICRLModel:
 
     def trainable_params(self):
         return [p for p in self.model.parameters() if p.requires_grad]
+
+    def trainable_state_dict(self):
+        return {
+            n: p.detach().cpu().clone()
+            for n, p in self.model.named_parameters() if p.requires_grad
+        }
 
     def forward(self, input_ids, attention_mask):
         return self.model(
@@ -111,12 +117,12 @@ class ICRLModel:
         return logits
 
     def compute_loss(self, batch):
-        input_ids = batch["input_ids"].to(self.device)
-        attention_mask = batch["attention_mask"].to(self.device)
-        action_mask = batch["action_mask"].to(self.device)
-        rewards = batch["rewards"].to(self.device)
-        next_action_idx = batch["next_action_idx"].to(self.device)
-        terminal_mask = batch["terminal_mask"].to(self.device)
+        input_ids = batch["input_ids"].to(self.device, non_blocking=True)
+        attention_mask = batch["attention_mask"].to(self.device, non_blocking=True)
+        action_mask = batch["action_mask"].to(self.device, non_blocking=True)
+        rewards = batch["rewards"].to(self.device, non_blocking=True)
+        next_action_idx = batch["next_action_idx"].to(self.device, non_blocking=True)
+        terminal_mask = batch["terminal_mask"].to(self.device, non_blocking=True)
 
         # Policy forward
         logits = self.forward(input_ids, attention_mask)
@@ -183,13 +189,23 @@ class ICRLModel:
                         self.alpha * p.data
                     )
 
-    def save(self, path):
-        torch.save({
-            "adapter": self.model.state_dict(),
-            "target": self.target_state,
-        }, path)
+    def save(self, path, **extra_state):
+        ckpt = {
+            "adapter": self.trainable_state_dict(),
+            "target": {
+                n: t.detach().cpu().clone()
+                for n, t in self.target_state.items()
+            },
+            "checkpoint_format": "adapter_only_v1",
+        }
+        ckpt.update(extra_state)
+        torch.save(ckpt, path)
 
     def load(self, path):
         ckpt = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(ckpt["adapter"])
-        self.target_state = ckpt["target"]
+        self.model.load_state_dict(ckpt["adapter"], strict=False)
+        self.target_state = {
+            n: t.to(self.device)
+            for n, t in ckpt["target"].items()
+        }
+        return ckpt

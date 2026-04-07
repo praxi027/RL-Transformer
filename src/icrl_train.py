@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -20,6 +21,24 @@ class TrajectoryDataset(Dataset):
         return {k: v[idx] for k, v in self.data.items()}
 
 
+def trim_log_to_step(log_path, step):
+    if not os.path.exists(log_path):
+        return
+
+    kept = []
+    with open(log_path) as f:
+        for line in f:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if row.get("step", 0) <= step:
+                kept.append(line)
+
+    with open(log_path, "w") as f:
+        f.writelines(kept)
+
+
 def train_icrl(
     dataset_path,
     output_dir,
@@ -37,6 +56,7 @@ def train_icrl(
     load_in_4bit=False,
     load_in_8bit=False,
     gradient_checkpointing=False,
+    resume=None,
 ):
     os.makedirs(output_dir, exist_ok=True)
     if batch_size % micro_batch_size != 0:
@@ -53,7 +73,12 @@ def train_icrl(
     grad_accum_steps = batch_size // micro_batch_size
     print(f"Dataset: {len(dataset)} slices")
     print(f"Batch size: {batch_size} (micro={micro_batch_size}, accum={grad_accum_steps})")
-    print(f"Steps per epoch: {len(dataset) // batch_size}")
+    steps_per_epoch = len(dataset) // batch_size
+    total_steps = steps_per_epoch * num_epochs
+    print(f"Steps per epoch: {steps_per_epoch}")
+    print(f"Total target steps: {total_steps}")
+    if resume:
+        print(f"Resume checkpoint: {resume}")
     if load_in_4bit:
         print("Quantization: 4-bit NF4")
     elif load_in_8bit:
@@ -75,18 +100,49 @@ def train_icrl(
         optimizer, start_factor=1e-8, end_factor=1.0, total_iters=warmup_steps,
     )
 
-    log_path = os.path.join(output_dir, "train_log.jsonl")
-    log_file = open(log_path, "w")
-
     step = 0
+    start_epoch = 0
     accum_count = 0
     accum_loss = 0.0
     accum_info = {}
 
+    if resume:
+        ckpt = model.load(resume)
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        loaded_scheduler = False
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+            loaded_scheduler = True
+        if "step" in ckpt:
+            step = ckpt["step"]
+        else:
+            match = re.search(r"checkpoint_(\d+)\.pt$", os.path.basename(resume))
+            if match:
+                step = int(match.group(1))
+        if step and not loaded_scheduler:
+            if step >= warmup_steps:
+                factor = 1.0
+                scheduler.last_epoch = warmup_steps
+            else:
+                factor = 1e-8 + (1.0 - 1e-8) * (step / warmup_steps)
+                scheduler.last_epoch = step
+            for group, base_lr in zip(optimizer.param_groups, scheduler.base_lrs):
+                group["lr"] = base_lr * factor
+        start_epoch = min(step // max(steps_per_epoch, 1), num_epochs)
+        print(f"Resumed from step {step}, epoch {start_epoch}")
+
+    log_path = os.path.join(output_dir, "train_log.jsonl")
+    if resume:
+        trim_log_to_step(log_path, step)
+    log_file = open(log_path, "a" if resume else "w")
+
     optimizer.zero_grad()
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         for micro_batch in loader:
+            if step >= total_steps:
+                break
             loss, info = model.compute_loss(micro_batch)
 
             if loss.item() == 0.0:
@@ -128,12 +184,26 @@ def train_icrl(
 
                 if step % save_interval == 0:
                     ckpt_path = os.path.join(output_dir, f"checkpoint_{step}.pt")
-                    model.save(ckpt_path)
+                    model.save(
+                        ckpt_path,
+                        optimizer=optimizer.state_dict(),
+                        scheduler=scheduler.state_dict(),
+                        step=step,
+                        epoch=epoch,
+                    )
                     print(f"  Saved {ckpt_path}")
+        if step >= total_steps:
+            break
 
         print(f"Epoch {epoch + 1}/{num_epochs} complete ({step} steps)")
 
     final_path = os.path.join(output_dir, "checkpoint_final.pt")
-    model.save(final_path)
+    model.save(
+        final_path,
+        optimizer=optimizer.state_dict(),
+        scheduler=scheduler.state_dict(),
+        step=step,
+        epoch=num_epochs,
+    )
     log_file.close()
     print(f"Training complete. {step} steps. Saved to {final_path}")
