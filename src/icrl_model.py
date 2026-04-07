@@ -149,12 +149,16 @@ class ICRLModel:
         # Q(s, a_taken)
         q_taken = q_at_actions.gather(1, action_idx.unsqueeze(1)).squeeze(1)
 
-        # Target Q-values at next-action positions
+        # Double DQN: policy selects action, target evaluates it
         next_pos = next_action_idx[batch_idx, pos_idx]
         next_logit_pos = next_pos - 1
-        target_q_next = target_q_all[batch_idx, next_logit_pos].max(dim=1).values
+        policy_q_next = q_all[batch_idx, next_logit_pos]
+        best_next_action = policy_q_next.argmax(dim=1)
+        target_q_next = target_q_all[batch_idx, next_logit_pos].gather(
+            1, best_next_action.unsqueeze(1),
+        ).squeeze(1)
 
-        # Bellman target: y = r + gamma * max Q_target(s') * (1 - terminal)
+        # Bellman target: y = r + gamma * Q_target(s', argmax_a Q_policy(s',a)) * (1 - terminal)
         term = terminal_mask[batch_idx, pos_idx].to(dtype=target_q_next.dtype)
         rew = rewards[batch_idx, pos_idx].to(dtype=target_q_next.dtype)
         y = rew + self.gamma * target_q_next * (1.0 - term)

@@ -9,31 +9,38 @@ from src.tokenize_data import MODEL_ID, ACTION_TOKEN_IDS
 from src.format import BOT, EOT, SHI, EHI, EID, ACTION_MAP
 
 
-def build_context_tokens(tokenizer, history):
-    """Convert episode history into token IDs for the model."""
+def build_current_episode_text(current_obs, episode_history=None):
+    """Build text for the current in-progress episode.
+
+    Includes BOT, all past steps in this episode, and the current
+    observation + action header. The model predicts the action word
+    as the next token.
+    """
     text = BOT
-    for step in history:
-        text += f"{SHI}observation{EHI}\n{step['obs']}{EID}"
-        text += f"{SHI}action{EHI}\n{ACTION_MAP[step['action']]}{EID}"
-        if step.get("reward", 0.0) != 0.0:
-            text += f"{SHI}reward{EHI}\n{step['reward']}{EID}"
-    # End previous episode, start new observation prompt
-    if history:
-        text += EOT
+    if episode_history:
+        for step in episode_history:
+            text += f"{SHI}observation{EHI}\n{step['obs']}{EID}"
+            text += f"{SHI}action{EHI}\n{ACTION_MAP[step['action']]}{EID}"
+            if step.get("reward", 0.0) != 0.0:
+                text += f"{SHI}reward{EHI}\n{step['reward']}{EID}"
+    text += f"{SHI}observation{EHI}\n{current_obs}{EID}{SHI}action{EHI}\n"
     return text
 
 
-def build_prompt_for_action(tokenizer, episodes_text, current_obs):
-    """Build the full prompt: past episodes + current observation.
+def build_prompt_for_action(tokenizer, episode_texts, current_obs,
+                            episode_history=None, max_tokens=4096):
+    """Build the full prompt: past episodes + current episode trajectory.
 
-    Returns token IDs ready for the model, ending right before
-    the action content token so the model's next-token logits
-    give us Q-values for the 4 actions.
+    Dynamically trims past episodes so the total prompt fits within
+    max_tokens. Returns token IDs ending right before the action
+    content token so the model's next-token logits give us Q-values.
     """
-    # Current step: observation header + obs number + action header
-    # The model will predict the action word as the next token
-    current = f"{SHI}observation{EHI}\n{current_obs}{EID}{SHI}action{EHI}\n"
-    full_text = episodes_text + current
+    current_ep = build_current_episode_text(current_obs, episode_history)
+    current_ep_tokens = len(tokenizer.encode(current_ep, add_special_tokens=False))
+    remaining = max_tokens - current_ep_tokens
+
+    past_text = trim_context(episode_texts, tokenizer, max_tokens=remaining)
+    full_text = past_text + current_ep
     return tokenizer.encode(full_text, add_special_tokens=False)
 
 
@@ -57,13 +64,18 @@ def select_action(model, tokenizer, token_ids, epsilon, rng):
     return q_values.argmax().item()
 
 
-def run_episode(model, tokenizer, env, episodes_text, epsilon, rng, max_steps=200):
+def run_episode(model, tokenizer, env, episode_texts, epsilon, rng,
+                max_steps=200, max_context_tokens=4096):
     """Run one episode, returning the trajectory and updated context."""
     obs, _ = env.reset()
     history = []
 
     for _ in range(max_steps):
-        token_ids = build_prompt_for_action(tokenizer, episodes_text, obs)
+        token_ids = build_prompt_for_action(
+            tokenizer, episode_texts, obs,
+            episode_history=history,
+            max_tokens=max_context_tokens,
+        )
         action = select_action(model, tokenizer, token_ids, epsilon, rng)
 
         next_obs, reward, terminated, truncated, _ = env.step(action)
@@ -89,10 +101,7 @@ def run_episode(model, tokenizer, env, episodes_text, epsilon, rng, max_steps=20
 
 
 def trim_context(episodes_texts, tokenizer, max_tokens=3600):
-    """Keep the most recent episodes that fit within max_tokens.
-
-    Reserves ~500 tokens for the current observation/action prompt.
-    """
+    """Keep the most recent episodes that fit within max_tokens."""
     combined = ""
     for ep_text in reversed(episodes_texts):
         candidate = ep_text + combined
@@ -122,14 +131,10 @@ def evaluate_map(
         else:
             epsilon = 1.0
 
-        # Sliding window: keep recent episodes within training context limit
-        episodes_text = trim_context(
-            episode_texts, tokenizer, max_tokens=max_context_tokens - 500,
-        )
-
         _, ep_text, total_reward = run_episode(
-            model, tokenizer, env, episodes_text, epsilon, rng,
+            model, tokenizer, env, episode_texts, epsilon, rng,
             max_steps=max_episode_steps,
+            max_context_tokens=max_context_tokens,
         )
         episode_texts.append(ep_text)
         rewards.append(total_reward)
