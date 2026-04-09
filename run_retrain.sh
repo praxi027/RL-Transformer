@@ -18,7 +18,7 @@ TRAIN_ARGS=(
     --output-dir experiments/icrl_fp16
 )
 
-if [ ! -f experiments/icrl_fp16/checkpoint_final.pt ]; then
+if [ -d experiments/icrl_fp16 ] && [ ! -f experiments/icrl_fp16/checkpoint_final.pt ]; then
     latest_checkpoint="$(
         find experiments/icrl_fp16 -maxdepth 1 -name 'checkpoint_*.pt' \
             | sed -E 's/.*checkpoint_([0-9]+)\.pt$/\1 &/' \

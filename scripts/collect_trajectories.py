@@ -44,7 +44,7 @@ def main():
         save_map_data(args.out_dir, data)
 
         manifest.append({
-            "map_id": map_id,
+            "map_id": data["map_id"],
             "map_desc": data["map_desc"],
             "map_size": data["map_size"],
             "num_episodes": data["num_episodes"],
@@ -52,7 +52,7 @@ def main():
         })
 
         tqdm.write(
-            f"Map {map_id:3d}: {data['map_size']}x{data['map_size']}, "
+            f"Map {data['map_id']:3d}: {data['map_size']}x{data['map_size']}, "
             f"{data['num_episodes']} eps, "
             f"{data['num_successes']} successes "
             f"({data['num_successes'] / max(data['num_episodes'], 1):.0%})"
