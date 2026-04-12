@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from peft import get_peft_model, IA3Config, prepare_model_for_kbit_training
 
@@ -80,7 +81,19 @@ class ICRLModel:
             for n, p in self.model.named_parameters() if p.requires_grad
         }
 
+        # Optional DDP wrapper for the policy forward. Target forward and
+        # parameter access always go through the unwrapped PEFT module.
+        self.ddp_model = None
+
         self.action_ids = ACTION_IDS_ORDERED.to(device)
+
+    def wrap_ddp(self, local_rank):
+        self.ddp_model = DistributedDataParallel(
+            self.model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
 
     def trainable_params(self):
         return [p for p in self.model.parameters() if p.requires_grad]
@@ -92,7 +105,8 @@ class ICRLModel:
         }
 
     def forward(self, input_ids, attention_mask):
-        return self.model(
+        m = self.ddp_model if self.ddp_model is not None else self.model
+        return m(
             input_ids=input_ids, attention_mask=attention_mask,
         ).logits
 
@@ -138,7 +152,9 @@ class ICRLModel:
         # Get action positions
         batch_idx, pos_idx = action_mask.nonzero(as_tuple=True)
         if len(batch_idx) == 0:
-            return torch.tensor(0.0, device=self.device, requires_grad=True), {}
+            # Graph-connected zero so .backward() is safe under DDP (all ranks
+            # must call backward together to keep gradient all-reduce in sync).
+            return logits.sum() * 0.0, {}
 
         # Shifted positions: logits at p-1 predict the token at p
         logit_pos = pos_idx - 1
