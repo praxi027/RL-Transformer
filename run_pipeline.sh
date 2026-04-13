@@ -53,14 +53,16 @@ else
     echo "Skipping - experiments/icrl/checkpoint_final.pt already exists"
 fi
 
+NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+
 echo "=== Step 5: Evaluate (in-distribution) ==="
-python scripts/eval_icrl.py \
+torchrun --standalone --nproc_per_node="${NUM_GPUS}" scripts/eval_icrl.py \
     --checkpoint experiments/icrl/checkpoint_final.pt \
     --num-maps 50 \
     --map-sizes 3,4,5
 
 echo "=== Step 5b: Evaluate (out-of-distribution) ==="
-python scripts/eval_icrl.py \
+torchrun --standalone --nproc_per_node="${NUM_GPUS}" scripts/eval_icrl.py \
     --checkpoint experiments/icrl/checkpoint_final.pt \
     --num-maps 50 \
     --map-sizes 6,7 \

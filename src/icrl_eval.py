@@ -146,14 +146,26 @@ def evaluate_map(
 def evaluate(
     model, tokenizer, num_maps=50, num_episodes=30,
     map_sizes=(3, 4, 5), seed=42, is_slippery=False,
+    rank=0, world_size=1,
 ):
-    """Evaluate on multiple random maps. Returns per-map results."""
-    rng = random.Random(seed)
-    results = []
+    """Evaluate on multiple random maps. Returns per-map results for this rank.
 
+    Map assignment is generated identically on all ranks from `seed`, then
+    rank r processes maps where i % world_size == r. This matches the
+    single-GPU assignment exactly when world_size == 1.
+    """
+    rng = random.Random(seed)
+    plan = []
     for i in range(num_maps):
         size = rng.choice(map_sizes)
         map_seed = rng.randint(0, 100_000)
+        plan.append((i, size, map_seed))
+
+    results = []
+    prefix = f"[rank {rank}] " if world_size > 1 else ""
+    for i, size, map_seed in plan:
+        if i % world_size != rank:
+            continue
         result = evaluate_map(
             model, tokenizer, size=size, num_episodes=num_episodes,
             is_slippery=is_slippery, seed=map_seed,
@@ -163,8 +175,9 @@ def evaluate(
         avg_reward = sum(result["rewards"]) / len(result["rewards"])
         late_reward = sum(result["rewards"][-10:]) / 10
         print(
-            f"Map {i:3d} ({size}x{size}): "
-            f"avg={avg_reward:.2f}  last10={late_reward:.2f}"
+            f"{prefix}Map {i:3d} ({size}x{size}): "
+            f"avg={avg_reward:.2f}  last10={late_reward:.2f}",
+            flush=True,
         )
         results.append(result)
 

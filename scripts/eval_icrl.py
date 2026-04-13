@@ -5,12 +5,23 @@ import sys
 
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+import torch.distributed as dist
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.icrl_model import ICRLModel
 from src.icrl_eval import evaluate
 from src.tokenize_data import load_tokenizer
+
+
+def init_distributed():
+    if "LOCAL_RANK" not in os.environ:
+        return 1, 0, 0
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl")
+    return dist.get_world_size(), dist.get_rank(), local_rank
 
 
 def main():
@@ -29,58 +40,80 @@ def main():
     quant_group.add_argument("--load-in-8bit", action="store_true")
     args = parser.parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    world_size, rank, local_rank = init_distributed()
+    is_main = rank == 0
+    distributed = world_size > 1
+    device = f"cuda:{local_rank}" if distributed else args.device
+
+    if is_main:
+        os.makedirs(args.output_dir, exist_ok=True)
     map_sizes = tuple(int(s) for s in args.map_sizes.split(","))
 
-    print(f"Loading model from {args.checkpoint} ...")
+    print(f"[rank {rank}] Loading model from {args.checkpoint} ...", flush=True)
     model = ICRLModel(
         model_id=args.model_id,
-        device=args.device,
+        device=device,
         load_in_4bit=args.load_in_4bit,
         load_in_8bit=args.load_in_8bit,
     )
     model.load(args.checkpoint)
     tokenizer = load_tokenizer()
 
-    print(f"Evaluating on {args.num_maps} maps, sizes={map_sizes}")
-    results = evaluate(
+    if is_main:
+        print(
+            f"Evaluating on {args.num_maps} maps, sizes={map_sizes}, "
+            f"world_size={world_size}",
+            flush=True,
+        )
+
+    local_results = evaluate(
         model, tokenizer,
         num_maps=args.num_maps,
         num_episodes=args.num_episodes,
         map_sizes=map_sizes,
         seed=args.seed,
+        rank=rank,
+        world_size=world_size,
     )
 
-    # Save results
-    results_path = os.path.join(args.output_dir, "eval_results.json")
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2)
+    if distributed:
+        gathered = [None] * world_size
+        dist.all_gather_object(gathered, local_results)
+        all_results = [r for shard in gathered for r in shard]
+    else:
+        all_results = local_results
 
-    # Compute mean reward curve across maps
-    all_rewards = np.array([r["rewards"] for r in results])
-    mean_rewards = all_rewards.mean(axis=0)
+    if is_main:
+        all_results.sort(key=lambda r: r["map_id"])
 
-    # Summary
-    avg_all = mean_rewards.mean()
-    avg_last10 = mean_rewards[-10:].mean()
-    print(f"\nOverall avg reward: {avg_all:.3f}")
-    print(f"Last 10 episodes avg: {avg_last10:.3f}")
+        results_path = os.path.join(args.output_dir, "eval_results.json")
+        with open(results_path, "w") as f:
+            json.dump(all_results, f, indent=2)
 
-    # Plot (reproduces Figures 3/4 from paper)
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(range(1, len(mean_rewards) + 1), mean_rewards, linewidth=2)
-    ax.set_xlabel("Episode")
-    ax.set_ylabel("Mean Cumulative Reward")
-    ax.set_title(f"ICRL Evaluation ({args.num_maps} maps, sizes={map_sizes})")
-    ax.set_ylim(-0.05, 1.05)
-    ax.grid(True, alpha=0.3)
-    fig.savefig(
-        os.path.join(args.output_dir, "reward_curve.png"),
-        dpi=150, bbox_inches="tight",
-    )
-    plt.close(fig)
+        all_rewards = np.array([r["rewards"] for r in all_results])
+        mean_rewards = all_rewards.mean(axis=0)
 
-    print(f"Results saved to {args.output_dir}")
+        avg_all = mean_rewards.mean()
+        avg_last10 = mean_rewards[-10:].mean()
+        print(f"\nOverall avg reward: {avg_all:.3f}")
+        print(f"Last 10 episodes avg: {avg_last10:.3f}")
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(range(1, len(mean_rewards) + 1), mean_rewards, linewidth=2)
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Mean Cumulative Reward")
+        ax.set_title(f"ICRL Evaluation ({args.num_maps} maps, sizes={map_sizes})")
+        ax.set_ylim(-0.05, 1.05)
+        ax.grid(True, alpha=0.3)
+        fig.savefig(
+            os.path.join(args.output_dir, "reward_curve.png"),
+            dpi=150, bbox_inches="tight",
+        )
+        print(f"Saved {args.output_dir}/reward_curve.png")
+
+    if distributed:
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
