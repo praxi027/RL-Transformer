@@ -47,11 +47,17 @@ python scripts/format_trajectories.py --output data/formatted/mid.jsonl
 
 Output: `data/formatted/mid.jsonl` (JSONL, one slice per line)
 
-Quality variants (for the data quality experiment in Section 4.4):
+Quality variants (Section 4.4). Paper definitions:
+- `high`: 5× bias toward successful episodes
+- `mid`: no bias, random mix (default)
+- `low`: 5× bias toward failed episodes
+
 ```bash
 python scripts/format_trajectories.py --quality high --output data/formatted/high.jsonl
 python scripts/format_trajectories.py --quality low --output data/formatted/low.jsonl
 ```
+
+Figure 6 finds mid slightly beats high in-distribution — curation beyond simple mixing doesn't help.
 
 ### Step 3: Tokenize (~minutes)
 
@@ -158,15 +164,19 @@ experiments/                Training outputs (gitignored)
 | Adapter | IA3 (keys, values, FFN down projection) |
 | Learning rate | 1e-2 |
 | LR warmup | Linear, first 10 batches |
-| Batch size | 10 slices x 4096 tokens |
+| Batch size | 10 slices × 4096 tokens |
 | Discount (gamma) | 0.9 |
-| Reward scale | 30x |
-| Polyak alpha | 0.1 |
+| Reward scale | 30× |
+| Polyak alpha | 0.1 (paper also tests 0.01 — much worse, see Figs 3/4) |
 | Training maps | 250 (sizes 3-5) |
+| OOD eval maps | sizes 6-7 |
 | Episodes per set | 20-40 |
 | Eval maps | 50 |
 | Eval episodes | 30 per map |
-| Eval epsilon warmup | 0 to 1 over first 20 episodes |
+| Eval epsilon warmup | 0 → 1 over first 20 episodes, then 1.0 |
+| Quality sampling ratio | 5:1 (high), 1:1 (mid), 1:5 (low) |
+
+The paper does not specify: optimizer, total training steps, number of slices in the training set, or max episode steps. Our choices: Adam, 1 epoch over 10k slices, 200 steps/episode cap.
 
 ## References
 
